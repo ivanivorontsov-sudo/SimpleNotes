@@ -31,9 +31,11 @@ jobs:
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: SimpleNotes-exe
           path: dist/SimpleNotes.exe
+          retention-days: 3
 
       - name: Install Inno Setup
         run: |
@@ -45,9 +47,11 @@ jobs:
 
       - name: Upload Installer artifact
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: SimpleNotes-Setup
           path: Output/SimpleNotes-Setup.exe
+          retention-days: 3
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
