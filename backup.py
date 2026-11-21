@@ -216,8 +216,13 @@ def merge_notes(existing: List[dict], imported: List[dict]) -> Tuple[List[dict],
     """
     merged = [dict(note) for note in existing]
     by_id = {note.get("id"): note for note in merged}
+    reserved_ids = set(by_id)
+    reserved_ids.update(
+        note.get("id") for note in imported
+        if isinstance(note.get("id"), int) and not isinstance(note.get("id"), bool)
+    )
     next_id = max(
-        (note_id for note_id in by_id if isinstance(note_id, int) and not isinstance(note_id, bool)),
+        (note_id for note_id in reserved_ids if isinstance(note_id, int) and not isinstance(note_id, bool)),
         default=0,
     ) + 1
     added = 0
@@ -231,7 +236,10 @@ def merge_notes(existing: List[dict], imported: List[dict]) -> Tuple[List[dict],
             if all(current.get(field) == note[field] for field in _NOTE_FIELDS):
                 skipped += 1
                 continue
+            while next_id in reserved_ids or next_id in by_id:
+                next_id += 1
             note["id"] = next_id
+            reserved_ids.add(next_id)
             next_id += 1
             conflicts += 1
 
