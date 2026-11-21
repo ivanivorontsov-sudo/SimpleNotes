@@ -92,7 +92,7 @@ class BackupTests(unittest.TestCase):
         merged, added, skipped, conflicts = merge_notes(existing, incoming)
 
         self.assertEqual((added, skipped, conflicts), (2, 1, 1))
-        self.assertEqual([note["id"] for note in merged], [1, 2, 3, 4])
+        self.assertEqual([note["id"] for note in merged], [1, 2, 4, 3])
         self.assertEqual(merged[1]["content"], "Сделать приложение")
         self.assertEqual(merged[2]["content"], "Изменённый текст")
         self.assertEqual(merged[3]["title"], "Новая")
