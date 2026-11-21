@@ -210,11 +210,11 @@ class NotesApp:
         note = self.get_selected_index()
         if note is None:
             return
-        if self.modified:
-            if not messagebox.askyesno("Несохранённые изменения", "Сохранить текущую заметку?"):
-                pass
-            else:
-                self.save_current()
+        if self.modified and messagebox.askyesno(
+            "Несохранённые изменения", "Сохранить текущую заметку?"
+        ):
+            if not self.save_current():
+                return
         self.current_note_id = note["id"]
         self.title_entry.delete(0, tk.END)
         self.title_entry.insert(0, note.get("title", ""))
@@ -228,9 +228,12 @@ class NotesApp:
         self.text_area.focus_set()
 
     def new_note(self):
-        if self.modified:
-            if messagebox.askyesno("Несохранённые изменения", "Сохранить текущую заметку?"):
-                self.save_current()
+        if self.modified and messagebox.askyesno(
+            "Несохранённые изменения", "Сохранить текущую заметку?"
+        ):
+            if not self.save_current():
+                return False
+
         new_id = max([n.get("id", 0) for n in self.notes] or [0]) + 1
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         note = {
@@ -243,7 +246,7 @@ class NotesApp:
         self.notes.append(note)
         if not self.save_notes():
             self.notes.remove(note)
-            return
+            return False
         self.search_var.set("")
         self.refresh_list()
         # Выбрать новую
@@ -254,22 +257,48 @@ class NotesApp:
         self.title_entry.focus_set()
         self.title_entry.select_range(0, tk.END)
         self.modified = False
+        return True
 
     def save_current(self):
-        if self.current_note_id is None:
-            self.new_note()
-            return
         title = self.title_entry.get().strip() or "Без названия"
         content = self.text_area.get("1.0", tk.END).rstrip()
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
-        for note in self.notes:
-            if note["id"] == self.current_note_id:
-                note["title"] = title
-                note["content"] = content
-                note["updated"] = now
-                break
-        if not self.save_notes():
-            return
+
+        if self.current_note_id is None:
+            new_id = max([n.get("id", 0) for n in self.notes] or [0]) + 1
+            note = {
+                "id": new_id,
+                "title": title,
+                "content": content,
+                "created": now,
+                "updated": now
+            }
+            self.notes.append(note)
+            if not self.save_notes():
+                self.notes.remove(note)
+                return False
+            self.current_note_id = new_id
+        else:
+            note = next(
+                (item for item in self.notes if item.get("id") == self.current_note_id),
+                None
+            )
+            if note is None:
+                messagebox.showerror(
+                    "Ошибка сохранения",
+                    "Текущая заметка больше не найдена. Несохранённый текст оставлен в редакторе."
+                )
+                return False
+
+            previous_note = dict(note)
+            note["title"] = title
+            note["content"] = content
+            note["updated"] = now
+            if not self.save_notes():
+                note.clear()
+                note.update(previous_note)
+                return False
+
         self.refresh_list()
         # Восстановить выделение
         for i, note in enumerate(sorted(self.notes, key=lambda n: n.get("updated", ""), reverse=True)):
@@ -280,6 +309,7 @@ class NotesApp:
                 break
         self.modified = False
         self.status_label.config(text=f"Сохранено: {now}", foreground="green")
+        return True
 
     def delete_note(self):
         note = self.get_selected_index()
@@ -454,9 +484,11 @@ class NotesApp:
         )
 
     def on_close(self):
-        if self.modified:
-            if messagebox.askyesno("Выход", "Есть несохранённые изменения. Сохранить?"):
-                self.save_current()
+        if self.modified and messagebox.askyesno(
+            "Выход", "Есть несохранённые изменения. Сохранить?"
+        ):
+            if not self.save_current():
+                return
         self.root.destroy()
 
 
