@@ -57,6 +57,25 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(imported[0]["content"], "Первая строка\nВторая строка")
         self.assertEqual(imported[1]["content"], "Текст")
 
+    def test_markdown_archive_round_trips_more_than_5000_notes(self):
+        notes = [
+            {
+                "id": index,
+                "title": "Заметка {}".format(index),
+                "content": "",
+                "created": "2026-11-20 10:00",
+                "updated": "2026-11-20 10:00",
+            }
+            for index in range(1, 5002)
+        ]
+
+        payload = create_markdown_archive(notes)
+        restored = decode_import(payload, "many-notes.zip")
+
+        self.assertEqual(len(restored), 5001)
+        self.assertEqual(restored[0], notes[0])
+        self.assertEqual(restored[-1], notes[-1])
+
     def test_rejects_wrong_format_and_unsupported_version(self):
         wrong_format = json.dumps({"format": "other", "version": 1, "notes": []}).encode("utf-8")
         with self.assertRaises(ValueError):
