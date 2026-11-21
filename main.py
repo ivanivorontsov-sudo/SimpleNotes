@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from backup import create_markdown_archive, decode_import, encode_backup, merge_notes
+
 
 class NotesApp:
     def __init__(self, root):
@@ -131,6 +133,10 @@ class NotesApp:
         file_menu.add_command(label="Экспорт заметки...", command=self.export_note)
         file_menu.add_command(label="Импорт заметки...", command=self.import_note)
         file_menu.add_separator()
+        file_menu.add_command(label="Экспортировать все (JSON)...", command=self.export_all_json)
+        file_menu.add_command(label="Экспортировать все (Markdown ZIP)...", command=self.export_all_markdown)
+        file_menu.add_command(label="Импортировать резервную копию...", command=self.import_backup)
+        file_menu.add_separator()
         file_menu.add_command(label="Выход", command=self.on_close)
 
         edit_menu = tk.Menu(menubar, tearoff=0)
@@ -160,11 +166,21 @@ class NotesApp:
             self.notes = []
 
     def save_notes(self):
+        temp_file = self.notes_file.with_name(self.notes_file.name + ".tmp")
         try:
-            with open(self.notes_file, "w", encoding="utf-8") as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(self.notes, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, self.notes_file)
+            return True
         except Exception as e:
+            try:
+                temp_file.unlink(missing_ok=True)
+            except OSError:
+                pass
             messagebox.showerror("Ошибка", f"Не удалось сохранить заметки:\n{e}")
+            return False
 
     def refresh_list(self):
         self.notes_listbox.delete(0, tk.END)
@@ -225,7 +241,9 @@ class NotesApp:
             "updated": now
         }
         self.notes.append(note)
-        self.save_notes()
+        if not self.save_notes():
+            self.notes.remove(note)
+            return
         self.search_var.set("")
         self.refresh_list()
         # Выбрать новую
@@ -250,7 +268,8 @@ class NotesApp:
                 note["content"] = content
                 note["updated"] = now
                 break
-        self.save_notes()
+        if not self.save_notes():
+            return
         self.refresh_list()
         # Восстановить выделение
         for i, note in enumerate(sorted(self.notes, key=lambda n: n.get("updated", ""), reverse=True)):
@@ -269,8 +288,12 @@ class NotesApp:
             return
         if not messagebox.askyesno("Подтверждение", f"Удалить заметку «{note.get('title', '')}»?"):
             return
+        previous_notes = self.notes
         self.notes = [n for n in self.notes if n["id"] != note["id"]]
-        self.save_notes()
+        if not self.save_notes():
+            self.notes = previous_notes
+            self.refresh_list()
+            return
         self.current_note_id = None
         self.title_entry.delete(0, tk.END)
         self.text_area.delete("1.0", tk.END)
@@ -318,11 +341,104 @@ class NotesApp:
                 "updated": now
             }
             self.notes.append(note)
-            self.save_notes()
+            if not self.save_notes():
+                self.notes.remove(note)
+                return
             self.refresh_list()
             self.status_label.config(text="Заметка импортирована", foreground="green")
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
+
+    def export_all_json(self):
+        if self.modified:
+            self.save_current()
+            if self.modified:
+                return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("Резервная копия SimpleNotes", "*.json"), ("Все файлы", "*.*")],
+            initialfile="simplenotes-backup-{}.json".format(datetime.now().strftime("%Y%m%d-%H%M%S"))
+        )
+        if not path:
+            return
+        try:
+            with open(path, "wb") as f:
+                f.write(encode_backup(self.notes))
+            self.status_label.config(text="Резервная копия экспортирована", foreground="green")
+        except Exception as e:
+            messagebox.showerror("Ошибка экспорта", str(e))
+
+    def export_all_markdown(self):
+        if self.modified:
+            self.save_current()
+            if self.modified:
+                return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("Архив Markdown", "*.zip"), ("Все файлы", "*.*")],
+            initialfile="simplenotes-markdown-{}.zip".format(datetime.now().strftime("%Y%m%d-%H%M%S"))
+        )
+        if not path:
+            return
+        try:
+            with open(path, "wb") as f:
+                f.write(create_markdown_archive(self.notes))
+            self.status_label.config(text="Архив Markdown экспортирован", foreground="green")
+        except Exception as e:
+            messagebox.showerror("Ошибка экспорта", str(e))
+
+    def import_backup(self):
+        path = filedialog.askopenfilename(
+            filetypes=[
+                ("Резервные копии и архивы заметок", "*.json *.zip"),
+                ("Резервная копия SimpleNotes", "*.json"),
+                ("Архив Markdown", "*.zip"),
+                ("Все файлы", "*.*"),
+            ]
+        )
+        if not path:
+            return
+        try:
+            if self.modified:
+                self.save_current()
+                if self.modified:
+                    return
+
+            incoming = decode_import(Path(path).read_bytes(), path)
+            if not incoming:
+                messagebox.showinfo("Импорт", "В файле нет заметок.")
+                return
+
+            merged, added, skipped, conflicts = merge_notes(self.notes, incoming)
+            if added == 0:
+                messagebox.showinfo("Импорт", "Все заметки из файла уже есть. Дубликаты пропущены.")
+                return
+
+            message = (
+                "Будет добавлено заметок: {}\n"
+                "Совпадающих копий пропущено: {}\n"
+                "Конфликтов идентификаторов: {}\n\n"
+                "Существующие заметки не будут удалены или перезаписаны. Продолжить?"
+            ).format(added, skipped, conflicts)
+            if not messagebox.askyesno("Импорт резервной копии", message):
+                return
+
+            previous_notes = self.notes
+            self.notes = merged
+            if not self.save_notes():
+                self.notes = previous_notes
+                return
+
+            self.refresh_list()
+            self.status_label.config(text="Импортировано заметок: {}".format(added), foreground="green")
+            messagebox.showinfo(
+                "Импорт завершён",
+                "Добавлено: {}\nПропущено как дубликаты: {}\nСохранено конфликтных версий: {}".format(
+                    added, skipped, conflicts
+                )
+            )
+        except Exception as e:
+            messagebox.showerror("Ошибка импорта", str(e))
 
     def show_about(self):
         messagebox.showinfo(
